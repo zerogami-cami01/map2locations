@@ -1,0 +1,461 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>日本 人口増減率マップ 2024</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin=""/>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body, #map { height: 100%; font-family: 'Hiragino Sans', 'Meiryo', sans-serif; }
+    #map { background: #f0f4f8; }
+
+    #loading {
+      position: fixed; inset: 0; background: rgba(255,255,255,0.92);
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      z-index: 9999; font-size: 16px; color: #555;
+    }
+    #loading .spinner {
+      width: 40px; height: 40px; border: 4px solid #ddd;
+      border-top-color: #4575b4; border-radius: 50%;
+      animation: spin 0.8s linear infinite; margin-bottom: 12px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ---- ホバー情報パネル ---- */
+    .info-panel {
+      background: rgba(255,255,255,0.95);
+      backdrop-filter: blur(4px);
+      padding: 12px 14px;
+      border-radius: 6px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+      font-size: 12px;
+      min-width: 200px;
+      max-width: 240px;
+      line-height: 1.5;
+    }
+    .info-panel .panel-title {
+      font-size: 11px; color: #999; border-bottom: 1px solid #eee;
+      padding-bottom: 5px; margin-bottom: 8px;
+    }
+    .info-panel .muni-name {
+      font-size: 14px; font-weight: bold; color: #222; margin-bottom: 8px;
+    }
+    .info-panel .main-rate {
+      font-size: 26px; font-weight: bold; display: block; margin-bottom: 8px;
+    }
+    .info-panel table { width: 100%; }
+    .info-panel td { padding: 2px 0; font-size: 12px; }
+    .info-panel td:last-child { text-align: right; font-weight: 600; }
+    .info-panel .hint { color: #aaa; font-size: 10px; margin-top: 8px; text-align: center; }
+
+    /* ---- 詳細パネル（右スライド） ---- */
+    #detail-panel {
+      position: fixed; top: 0; right: -380px; width: 360px; height: 100%;
+      background: #fff; box-shadow: -4px 0 20px rgba(0,0,0,0.15);
+      z-index: 1000; overflow-y: auto;
+      transition: right 0.3s ease;
+      font-size: 13px;
+    }
+    #detail-panel.open { right: 0; }
+
+    #detail-panel .dp-header {
+      background: #2c3e50; color: #fff; padding: 16px 16px 12px;
+      position: sticky; top: 0; z-index: 1;
+    }
+    #detail-panel .dp-header .dp-pref { font-size: 11px; opacity: 0.75; margin-bottom: 2px; }
+    #detail-panel .dp-header .dp-name { font-size: 18px; font-weight: bold; }
+    #detail-panel .dp-close {
+      position: absolute; top: 12px; right: 14px;
+      background: none; border: none; color: #fff;
+      font-size: 22px; cursor: pointer; line-height: 1; opacity: 0.8;
+    }
+    #detail-panel .dp-close:hover { opacity: 1; }
+
+    #detail-panel .dp-section { padding: 14px 16px; border-bottom: 1px solid #f0f0f0; }
+    #detail-panel .dp-section-title {
+      font-size: 10px; font-weight: bold; letter-spacing: 0.08em;
+      color: #888; text-transform: uppercase; margin-bottom: 10px;
+    }
+
+    /* サマリーカード */
+    .summary-grid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+    }
+    .summary-card {
+      background: #f8f9fa; border-radius: 6px; padding: 10px 12px;
+    }
+    .summary-card .sc-label { font-size: 10px; color: #888; margin-bottom: 3px; }
+    .summary-card .sc-value { font-size: 18px; font-weight: bold; color: #222; }
+    .summary-card .sc-value.rate-positive { color: #2171b5; }
+    .summary-card .sc-value.rate-negative { color: #cb181d; }
+    .summary-card.wide { grid-column: 1 / -1; }
+    .summary-card.wide .sc-value { font-size: 22px; }
+
+    /* 内訳テーブル */
+    .breakdown-table { width: 100%; border-collapse: collapse; }
+    .breakdown-table th {
+      text-align: left; font-size: 11px; color: #999;
+      font-weight: normal; padding: 3px 0; border-bottom: 1px solid #eee;
+    }
+    .breakdown-table th:not(:first-child) { text-align: right; }
+    .breakdown-table td { padding: 5px 0; font-size: 13px; }
+    .breakdown-table td:not(:first-child) { text-align: right; font-weight: 600; }
+    .breakdown-table tr.total-row td { font-weight: bold; border-top: 1px solid #ddd; padding-top: 6px; }
+    .breakdown-table .label-col { color: #555; }
+    .breakdown-table .sub-row td { font-size: 11px; color: #888; }
+    .breakdown-table .sub-row td:not(:first-child) { font-weight: normal; }
+
+    /* 補助テーブル */
+    .aux-table { width: 100%; }
+    .aux-table td { padding: 5px 0; font-size: 13px; }
+    .aux-table td:last-child { text-align: right; font-weight: 600; }
+    .aux-table .sub { font-size: 11px; color: #888; }
+    .aux-table .sub td:last-child { font-weight: normal; }
+
+    /* レイヤー切替 */
+    .layer-control {
+      background: rgba(255,255,255,0.95);
+      backdrop-filter: blur(4px);
+      padding: 8px 12px;
+      border-radius: 6px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+      font-size: 12px;
+    }
+    .layer-control label { display: flex; align-items: center; cursor: pointer; padding: 3px 0; }
+    .layer-control input[type=radio] { margin-right: 6px; }
+    .layer-control h4 { font-size: 11px; color: #888; margin-bottom: 6px; }
+
+    /* 凡例 */
+    .legend {
+      background: rgba(255,255,255,0.95);
+      backdrop-filter: blur(4px);
+      padding: 10px 14px;
+      border-radius: 6px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+      font-size: 12px;
+    }
+    .legend h4 { font-size: 11px; color: #888; margin-bottom: 8px; }
+    .legend-item { display: flex; align-items: center; margin: 3px 0; }
+    .legend-color {
+      width: 16px; height: 16px; border-radius: 2px; margin-right: 7px;
+      flex-shrink: 0; border: 1px solid rgba(0,0,0,0.08);
+    }
+  </style>
+</head>
+<body>
+  <div id="loading">
+    <div class="spinner"></div>
+    地図データを読み込み中…
+  </div>
+  <div id="map"></div>
+
+  <!-- 詳細パネル -->
+  <div id="detail-panel">
+    <div class="dp-header">
+      <button class="dp-close" id="dp-close">×</button>
+      <div class="dp-pref" id="dp-pref"></div>
+      <div class="dp-name" id="dp-name"></div>
+    </div>
+
+    <div class="dp-section">
+      <div class="dp-section-title">サマリー</div>
+      <div class="summary-grid" id="dp-summary"></div>
+    </div>
+
+    <div class="dp-section">
+      <div class="dp-section-title">内訳（令和6年）</div>
+      <table class="breakdown-table" id="dp-breakdown"></table>
+    </div>
+
+    <div class="dp-section">
+      <div class="dp-section-title">補助項目（2025年1月1日現在）</div>
+      <table class="aux-table" id="dp-aux"></table>
+    </div>
+  </div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/chroma-js/2.4.2/chroma.min.js"></script>
+  <script>
+    const COLOR_SCALE = chroma.scale(['#d73027','#f46d43','#fdae61','#fee090','#e0f3f8','#abd9e9','#74add1','#4575b4'])
+      .domain([-6, 6]).mode('lab');
+
+    function getColor(rate) {
+      if (rate === null || rate === undefined) return '#cccccc';
+      return COLOR_SCALE(Math.max(-6, Math.min(6, rate))).hex();
+    }
+
+    function fmt(n, unit = '') {
+      if (n === null || n === undefined) return '-';
+      return n.toLocaleString() + unit;
+    }
+    function fmtRate(r, digits = 2) {
+      if (r === null || r === undefined) return '-';
+      return (r > 0 ? '+' : '') + r.toFixed(digits) + '%';
+    }
+    function fmtCount(n) {
+      if (n === null || n === undefined) return '-';
+      return (n > 0 ? '+' : '') + n.toLocaleString();
+    }
+    function rateClass(r) {
+      if (r === null || r === undefined) return '';
+      return r > 0 ? 'rate-positive' : r < 0 ? 'rate-negative' : '';
+    }
+
+    // ---- Map ----
+    const map = L.map('map', { zoomControl: false }).setView([36.5, 137.5], 6);
+    L.control.zoom({ position: 'topright' }).addTo(map);
+
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png', {
+      attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors © <a href="https://carto.com/">CARTO</a>',
+      subdomains: 'abcd', maxZoom: 19
+    }).addTo(map);
+
+    map.attributionControl.addAttribution(
+      '人口データ: <a href="https://www.soumu.go.jp/main_sosiki/jichi_gyousei/daityo/jinkou_jinkoudoutai-setaisuu.html">総務省</a> | ' +
+      '境界: <a href="https://nlftp.mlit.go.jp/ksj/">国土数値情報</a>/<a href="https://github.com/smartnews-smri/japan-topography">smartnews-smri</a>'
+    );
+
+    // ---- ホバーパネル ----
+    const infoControl = L.control({ position: 'topleft' });
+    infoControl.onAdd = function() {
+      this._div = L.DomUtil.create('div', 'info-panel');
+      this.reset();
+      return this._div;
+    };
+    infoControl.reset = function() {
+      this._div.innerHTML = `
+        <div class="panel-title">日本 人口増減率マップ 2024</div>
+        <p style="color:#aaa;font-size:11px">市区町村にホバーして詳細を確認<br>クリックで詳細データを表示</p>`;
+    };
+    infoControl.update = function(d, rateKey) {
+      if (!d) { this.reset(); return; }
+      const rate = d[rateKey];
+      const color = getColor(rate);
+      this._div.innerHTML = `
+        <div class="panel-title">${d.prefecture}</div>
+        <div class="muni-name">${d.name}</div>
+        <span class="main-rate" style="color:${color}">${fmtRate(rate)}</span>
+        <table>
+          <tr><td>総人口</td><td>${fmt(d.population, '人')}</td></tr>
+          <tr><td>増減率</td><td>${fmtRate(d.changeRate)}</td></tr>
+          <tr><td>自然増減率</td><td>${fmtRate(d.naturalRate)}</td></tr>
+          <tr><td>社会増減率</td><td>${fmtRate(d.socialRate)}</td></tr>
+          <tr><td>社会増減数</td><td>${fmtCount(d.socialCount)}人</td></tr>
+        </table>
+        <div class="hint">クリックで詳細表示</div>`;
+    };
+    infoControl.addTo(map);
+
+    // ---- 凡例 ----
+    const legendControl = L.control({ position: 'bottomright' });
+    legendControl.onAdd = function() {
+      const div = L.DomUtil.create('div', 'legend');
+      div.innerHTML = '<h4>増減率 (%)</h4>';
+      [
+        [5, '＋3%以上'], [3.5, '＋1〜3%'], [1.5, '0〜＋1%'],
+        [0.5, '0〜-1%'], [-1.5, '-1〜-3%'], [-3.5, '-3〜-5%'], [-5.5, '-5%以下'],
+      ].forEach(([val, label]) => {
+        div.innerHTML += `<div class="legend-item">
+          <div class="legend-color" style="background:${getColor(val)}"></div>
+          <span>${label}</span></div>`;
+      });
+      div.innerHTML += `<div class="legend-item">
+        <div class="legend-color" style="background:#cccccc"></div>
+        <span>データなし</span></div>`;
+      return div;
+    };
+    legendControl.addTo(map);
+
+    // ---- レイヤー切替 ----
+    const layerSwitchControl = L.control({ position: 'bottomleft' });
+    layerSwitchControl.onAdd = function() {
+      const div = L.DomUtil.create('div', 'layer-control');
+      div.innerHTML = `
+        <h4>表示データ</h4>
+        <label><input type="radio" name="rateKey" value="changeRate" checked> 増減率（総合）</label>
+        <label><input type="radio" name="rateKey" value="naturalRate"> 自然増減率</label>
+        <label><input type="radio" name="rateKey" value="socialRate"> 社会増減率</label>`;
+      L.DomEvent.disableClickPropagation(div);
+      return div;
+    };
+    layerSwitchControl.addTo(map);
+
+    // ---- 詳細パネル ----
+    const detailPanel = document.getElementById('detail-panel');
+    document.getElementById('dp-close').addEventListener('click', closeDetail);
+
+    function openDetail(d) {
+      document.getElementById('dp-pref').textContent = d.prefecture;
+      document.getElementById('dp-name').textContent = d.name;
+
+      // サマリー
+      document.getElementById('dp-summary').innerHTML = `
+        <div class="summary-card wide">
+          <div class="sc-label">総人口（2025年1月1日）</div>
+          <div class="sc-value">${fmt(d.population, '人')}</div>
+        </div>
+        <div class="summary-card">
+          <div class="sc-label">増減率</div>
+          <div class="sc-value ${rateClass(d.changeRate)}">${fmtRate(d.changeRate)}</div>
+        </div>
+        <div class="summary-card">
+          <div class="sc-label">増減数</div>
+          <div class="sc-value ${rateClass(d.changeCount)}">${fmtCount(d.changeCount)}人</div>
+        </div>
+        <div class="summary-card">
+          <div class="sc-label">自然増減率</div>
+          <div class="sc-value ${rateClass(d.naturalRate)}">${fmtRate(d.naturalRate)}</div>
+        </div>
+        <div class="summary-card">
+          <div class="sc-label">社会増減率</div>
+          <div class="sc-value ${rateClass(d.socialRate)}">${fmtRate(d.socialRate)}</div>
+        </div>`;
+
+      // 内訳
+      document.getElementById('dp-breakdown').innerHTML = `
+        <tr>
+          <th>項目</th><th>国内</th><th>国外</th><th>計</th>
+        </tr>
+        <tr>
+          <td class="label-col">転入者数</td>
+          <td>${fmt(d.moveInDomestic)}</td>
+          <td>${fmt(d.moveInOverseas)}</td>
+          <td>${fmt(d.moveInTotal)}</td>
+        </tr>
+        <tr>
+          <td class="label-col">転出者数</td>
+          <td>${fmt(d.moveOutDomestic)}</td>
+          <td>${fmt(d.moveOutOverseas)}</td>
+          <td>${fmt(d.moveOutTotal)}</td>
+        </tr>
+        <tr class="total-row">
+          <td class="label-col">社会増減数</td>
+          <td colspan="2"></td>
+          <td>${fmtCount(d.socialCount)}</td>
+        </tr>
+        <tr><td colspan="4" style="padding-top:10px"></td></tr>
+        <tr>
+          <td class="label-col">出生者数</td>
+          <td colspan="2"></td>
+          <td>${fmt(d.births)}</td>
+        </tr>
+        <tr>
+          <td class="label-col">死亡者数</td>
+          <td colspan="2"></td>
+          <td>${fmt(d.deaths)}</td>
+        </tr>
+        <tr class="total-row">
+          <td class="label-col">自然増減数</td>
+          <td colspan="2"></td>
+          <td>${fmtCount(d.naturalCount)}</td>
+        </tr>`;
+
+      // 補助項目
+      document.getElementById('dp-aux').innerHTML = `
+        <tr>
+          <td>世帯数</td>
+          <td>${fmt(d.households, '世帯')}</td>
+        </tr>
+        <tr>
+          <td>男女別人口</td><td></td>
+        </tr>
+        <tr class="sub">
+          <td style="padding-left:12px">男性</td>
+          <td>${fmt(d.male, '人')}</td>
+        </tr>
+        <tr class="sub">
+          <td style="padding-left:12px">女性</td>
+          <td>${fmt(d.female, '人')}</td>
+        </tr>
+        <tr class="sub">
+          <td style="padding-left:12px">計</td>
+          <td>${fmt(d.population, '人')}</td>
+        </tr>`;
+
+      detailPanel.classList.add('open');
+    }
+
+    function closeDetail() {
+      detailPanel.classList.remove('open');
+    }
+
+    // ---- GeoJSON レイヤー ----
+    let geojsonLayer = null;
+    let currentRateKey = 'changeRate';
+    let popData = null;
+
+    function styleFeature(feature) {
+      const code = feature.properties.N03_007;
+      const d = popData && code ? popData[code] : null;
+      return {
+        fillColor: d && d[currentRateKey] !== null ? getColor(d[currentRateKey]) : '#cccccc',
+        weight: 0.5, opacity: 0.6, color: '#ffffff', fillOpacity: 0.85
+      };
+    }
+
+    function highlightFeature(e) {
+      e.target.setStyle({ weight: 2, color: '#555', fillOpacity: 0.95 });
+      e.target.bringToFront();
+      const code = e.target.feature.properties.N03_007;
+      infoControl.update(popData && code ? popData[code] : null, currentRateKey);
+    }
+
+    function resetHighlight(e) {
+      geojsonLayer.resetStyle(e.target);
+      infoControl.reset();
+    }
+
+    function onFeatureClick(e) {
+      const code = e.target.feature.properties.N03_007;
+      const d = popData && code ? popData[code] : null;
+      if (d) openDetail(d);
+    }
+
+    function renderLayer() {
+      if (geojsonLayer) geojsonLayer.remove();
+      geojsonLayer = L.geoJSON(window._geoData, {
+        style: styleFeature,
+        onEachFeature: (feature, layer) => {
+          layer.on({ mouseover: highlightFeature, mouseout: resetHighlight, click: onFeatureClick });
+        }
+      }).addTo(map);
+    }
+
+    document.addEventListener('change', function(e) {
+      if (e.target.name === 'rateKey') {
+        currentRateKey = e.target.value;
+        if (geojsonLayer) {
+          geojsonLayer.eachLayer(layer => {
+            const code = layer.feature.properties.N03_007;
+            const d = popData && code ? popData[code] : null;
+            layer.setStyle({
+              fillColor: d && d[currentRateKey] !== null ? getColor(d[currentRateKey]) : '#cccccc'
+            });
+          });
+        }
+      }
+    });
+
+    // マップクリック（地図の空白）で詳細パネルを閉じる
+    map.on('click', function(e) {
+      if (e.originalEvent.target === map.getContainer().querySelector('canvas') ||
+          e.originalEvent.target.tagName === 'path') return;
+      closeDetail();
+    });
+
+    Promise.all([
+      fetch('data/population.json').then(r => r.json()),
+      fetch('data/municipalities.geojson').then(r => r.json())
+    ]).then(([pop, geo]) => {
+      popData = pop;
+      window._geoData = geo;
+      renderLayer();
+      document.getElementById('loading').style.display = 'none';
+    }).catch(err => {
+      document.getElementById('loading').innerHTML =
+        '<p style="color:red">データの読み込みに失敗しました。<br>' + err.message + '</p>';
+    });
+  </script>
+</body>
+</html>

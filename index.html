@@ -77,6 +77,9 @@
       font-size: 10px; font-weight: bold; letter-spacing: 0.08em;
       color: #888; text-transform: uppercase; margin-bottom: 10px;
     }
+    #detail-panel .dp-section-title.foreign-title {
+      color: #4575b4;
+    }
 
     /* サマリーカード */
     .summary-grid {
@@ -85,6 +88,7 @@
     .summary-card {
       background: #f8f9fa; border-radius: 6px; padding: 10px 12px;
     }
+    .summary-card.foreign-card { background: #eef4fb; }
     .summary-card .sc-label { font-size: 10px; color: #888; margin-bottom: 3px; }
     .summary-card .sc-value { font-size: 18px; font-weight: bold; color: #222; }
     .summary-card .sc-value.rate-positive { color: #2171b5; }
@@ -125,6 +129,7 @@
     .layer-control label { display: flex; align-items: center; cursor: pointer; padding: 3px 0; }
     .layer-control input[type=radio] { margin-right: 6px; }
     .layer-control h4 { font-size: 11px; color: #888; margin-bottom: 6px; }
+    .layer-control .lc-divider { border-top: 1px solid #eee; margin: 7px 0; }
 
     /* 凡例 */
     .legend {
@@ -159,30 +164,45 @@
     </div>
 
     <div class="dp-section">
-      <div class="dp-section-title">サマリー</div>
+      <div class="dp-section-title">サマリー（総計）</div>
       <div class="summary-grid" id="dp-summary"></div>
     </div>
 
     <div class="dp-section">
-      <div class="dp-section-title">内訳（令和6年）</div>
+      <div class="dp-section-title">内訳（令和6年・総計）</div>
       <table class="breakdown-table" id="dp-breakdown"></table>
     </div>
 
     <div class="dp-section">
-      <div class="dp-section-title">補助項目（2025年1月1日現在）</div>
+      <div class="dp-section-title">補助項目（2025年1月1日・総計）</div>
       <table class="aux-table" id="dp-aux"></table>
+    </div>
+
+    <div class="dp-section" id="dp-foreign-section">
+      <div class="dp-section-title foreign-title">外国人住民</div>
+      <div class="summary-grid" id="dp-foreign-summary"></div>
+    </div>
+
+    <div class="dp-section" id="dp-foreign-breakdown-section">
+      <div class="dp-section-title foreign-title">内訳（令和6年・外国人住民）</div>
+      <table class="breakdown-table" id="dp-foreign-breakdown"></table>
     </div>
   </div>
 
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/chroma-js/2.4.2/chroma.min.js"></script>
   <script>
-    const COLOR_SCALE = chroma.scale(['#d73027','#f46d43','#fdae61','#fee090','#e0f3f8','#abd9e9','#74add1','#4575b4'])
+    const COLOR_SCALE_TOTAL = chroma.scale(['#d73027','#f46d43','#fdae61','#fee090','#e0f3f8','#abd9e9','#74add1','#4575b4'])
       .domain([-6, 6]).mode('lab');
+    const COLOR_SCALE_FOREIGN = chroma.scale(['#d73027','#f46d43','#fdae61','#fee090','#e0f3f8','#abd9e9','#74add1','#4575b4'])
+      .domain([-15, 50]).mode('lab');
 
-    function getColor(rate) {
+    function getColor(rate, isForeign) {
       if (rate === null || rate === undefined) return '#cccccc';
-      return COLOR_SCALE(Math.max(-6, Math.min(6, rate))).hex();
+      const scale = isForeign ? COLOR_SCALE_FOREIGN : COLOR_SCALE_TOTAL;
+      const clampMin = isForeign ? -15 : -6;
+      const clampMax = isForeign ? 50 : 6;
+      return scale(Math.max(clampMin, Math.min(clampMax, rate))).hex();
     }
 
     function fmt(n, unit = '') {
@@ -228,20 +248,23 @@
         <div class="panel-title">日本 人口増減率マップ 2024</div>
         <p style="color:#aaa;font-size:11px">市区町村にホバーして詳細を確認<br>クリックで詳細データを表示</p>`;
     };
-    infoControl.update = function(d, rateKey) {
+    infoControl.update = function(d, rateKey, isForeign) {
       if (!d) { this.reset(); return; }
-      const rate = d[rateKey];
-      const color = getColor(rate);
+      const src = isForeign ? d.foreign : d;
+      if (!src) { this.reset(); return; }
+      const rate = src[rateKey];
+      const color = getColor(rate, isForeign);
+      const label = isForeign ? '外国人住民' : '総計';
       this._div.innerHTML = `
-        <div class="panel-title">${d.prefecture}</div>
+        <div class="panel-title">${d.prefecture}　<span style="font-size:10px;background:${isForeign ? '#4575b4' : '#555'};color:#fff;padding:1px 5px;border-radius:3px">${label}</span></div>
         <div class="muni-name">${d.name}</div>
         <span class="main-rate" style="color:${color}">${fmtRate(rate)}</span>
         <table>
-          <tr><td>総人口</td><td>${fmt(d.population, '人')}</td></tr>
-          <tr><td>増減率</td><td>${fmtRate(d.changeRate)}</td></tr>
-          <tr><td>自然増減率</td><td>${fmtRate(d.naturalRate)}</td></tr>
-          <tr><td>社会増減率</td><td>${fmtRate(d.socialRate)}</td></tr>
-          <tr><td>社会増減数</td><td>${fmtCount(d.socialCount)}人</td></tr>
+          <tr><td>${isForeign ? '外国人人口' : '総人口'}</td><td>${fmt(src.population, '人')}</td></tr>
+          <tr><td>増減率</td><td>${fmtRate(src.changeRate)}</td></tr>
+          <tr><td>自然増減率</td><td>${fmtRate(src.naturalRate)}</td></tr>
+          <tr><td>社会増減率</td><td>${fmtRate(src.socialRate)}</td></tr>
+          <tr><td>社会増減数</td><td>${fmtCount(src.socialCount)}人</td></tr>
         </table>
         <div class="hint">クリックで詳細表示</div>`;
     };
@@ -250,20 +273,29 @@
     // ---- 凡例 ----
     const legendControl = L.control({ position: 'bottomright' });
     legendControl.onAdd = function() {
-      const div = L.DomUtil.create('div', 'legend');
-      div.innerHTML = '<h4>増減率 (%)</h4>';
-      [
-        [5, '＋3%以上'], [3.5, '＋1〜3%'], [1.5, '0〜＋1%'],
-        [0.5, '0〜-1%'], [-1.5, '-1〜-3%'], [-3.5, '-3〜-5%'], [-5.5, '-5%以下'],
-      ].forEach(([val, label]) => {
-        div.innerHTML += `<div class="legend-item">
-          <div class="legend-color" style="background:${getColor(val)}"></div>
+      this._div = L.DomUtil.create('div', 'legend');
+      this.render(false);
+      return this._div;
+    };
+    legendControl.render = function(isForeign) {
+      this._div.innerHTML = '<h4>増減率 (%)</h4>';
+      const items = isForeign
+        ? [
+            [45, '＋30%以上'], [30, '＋15〜30%'], [15, '＋5〜15%'],
+            [2, '0〜＋5%'], [-5, '0〜-5%'], [-12, '-5%以下'],
+          ]
+        : [
+            [5, '＋3%以上'], [3.5, '＋1〜3%'], [1.5, '0〜＋1%'],
+            [0.5, '0〜-1%'], [-1.5, '-1〜-3%'], [-3.5, '-3〜-5%'], [-5.5, '-5%以下'],
+          ];
+      items.forEach(([val, label]) => {
+        this._div.innerHTML += `<div class="legend-item">
+          <div class="legend-color" style="background:${getColor(val, isForeign)}"></div>
           <span>${label}</span></div>`;
       });
-      div.innerHTML += `<div class="legend-item">
+      this._div.innerHTML += `<div class="legend-item">
         <div class="legend-color" style="background:#cccccc"></div>
         <span>データなし</span></div>`;
-      return div;
     };
     legendControl.addTo(map);
 
@@ -272,6 +304,10 @@
     layerSwitchControl.onAdd = function() {
       const div = L.DomUtil.create('div', 'layer-control');
       div.innerHTML = `
+        <h4>データ種別</h4>
+        <label><input type="radio" name="dataMode" value="total" checked> 総計</label>
+        <label><input type="radio" name="dataMode" value="foreign"> 外国人住民</label>
+        <div class="lc-divider"></div>
         <h4>表示データ</h4>
         <label><input type="radio" name="rateKey" value="changeRate" checked> 増減率（総合）</label>
         <label><input type="radio" name="rateKey" value="naturalRate"> 自然増減率</label>
@@ -289,7 +325,7 @@
       document.getElementById('dp-pref').textContent = d.prefecture;
       document.getElementById('dp-name').textContent = d.name;
 
-      // サマリー
+      // 総計サマリー
       document.getElementById('dp-summary').innerHTML = `
         <div class="summary-card wide">
           <div class="sc-label">総人口（2025年1月1日）</div>
@@ -312,7 +348,7 @@
           <div class="sc-value ${rateClass(d.socialRate)}">${fmtRate(d.socialRate)}</div>
         </div>`;
 
-      // 内訳
+      // 総計内訳
       document.getElementById('dp-breakdown').innerHTML = `
         <tr>
           <th>項目</th><th>国内</th><th>国外</th><th>計</th>
@@ -373,6 +409,79 @@
           <td>${fmt(d.population, '人')}</td>
         </tr>`;
 
+      // 外国人住民
+      const f = d.foreign;
+      const foreignSection = document.getElementById('dp-foreign-section');
+      const foreignBreakdownSection = document.getElementById('dp-foreign-breakdown-section');
+      if (f) {
+        const ratio = d.population > 0 ? (f.population / d.population * 100).toFixed(2) : '-';
+        document.getElementById('dp-foreign-summary').innerHTML = `
+          <div class="summary-card wide foreign-card">
+            <div class="sc-label">外国人人口（2025年1月1日）</div>
+            <div class="sc-value">${fmt(f.population, '人')} <span style="font-size:13px;color:#888">（${ratio}%）</span></div>
+          </div>
+          <div class="summary-card foreign-card">
+            <div class="sc-label">増減率</div>
+            <div class="sc-value ${rateClass(f.changeRate)}">${fmtRate(f.changeRate)}</div>
+          </div>
+          <div class="summary-card foreign-card">
+            <div class="sc-label">増減数</div>
+            <div class="sc-value ${rateClass(f.changeCount)}">${fmtCount(f.changeCount)}人</div>
+          </div>
+          <div class="summary-card foreign-card">
+            <div class="sc-label">自然増減率</div>
+            <div class="sc-value ${rateClass(f.naturalRate)}">${fmtRate(f.naturalRate)}</div>
+          </div>
+          <div class="summary-card foreign-card">
+            <div class="sc-label">社会増減率</div>
+            <div class="sc-value ${rateClass(f.socialRate)}">${fmtRate(f.socialRate)}</div>
+          </div>`;
+
+        document.getElementById('dp-foreign-breakdown').innerHTML = `
+          <tr>
+            <th>項目</th><th>国内</th><th>国外</th><th>計</th>
+          </tr>
+          <tr>
+            <td class="label-col">転入者数</td>
+            <td>${fmt(f.moveInDomestic)}</td>
+            <td>${fmt(f.moveInOverseas)}</td>
+            <td>${fmt(f.moveInTotal)}</td>
+          </tr>
+          <tr>
+            <td class="label-col">転出者数</td>
+            <td>${fmt(f.moveOutDomestic)}</td>
+            <td>${fmt(f.moveOutOverseas)}</td>
+            <td>${fmt(f.moveOutTotal)}</td>
+          </tr>
+          <tr class="total-row">
+            <td class="label-col">社会増減数</td>
+            <td colspan="2"></td>
+            <td>${fmtCount(f.socialCount)}</td>
+          </tr>
+          <tr><td colspan="4" style="padding-top:10px"></td></tr>
+          <tr>
+            <td class="label-col">出生者数</td>
+            <td colspan="2"></td>
+            <td>${fmt(f.births)}</td>
+          </tr>
+          <tr>
+            <td class="label-col">死亡者数</td>
+            <td colspan="2"></td>
+            <td>${fmt(f.deaths)}</td>
+          </tr>
+          <tr class="total-row">
+            <td class="label-col">自然増減数</td>
+            <td colspan="2"></td>
+            <td>${fmtCount(f.naturalCount)}</td>
+          </tr>`;
+
+        foreignSection.style.display = '';
+        foreignBreakdownSection.style.display = '';
+      } else {
+        foreignSection.style.display = 'none';
+        foreignBreakdownSection.style.display = 'none';
+      }
+
       detailPanel.classList.add('open');
     }
 
@@ -383,13 +492,23 @@
     // ---- GeoJSON レイヤー ----
     let geojsonLayer = null;
     let currentRateKey = 'changeRate';
+    let currentDataMode = 'total';
     let popData = null;
+
+    function isForeignMode() { return currentDataMode === 'foreign'; }
+
+    function getDisplayRate(d) {
+      if (!d) return null;
+      const src = isForeignMode() ? d.foreign : d;
+      return src ? src[currentRateKey] : null;
+    }
 
     function styleFeature(feature) {
       const code = feature.properties.N03_007;
       const d = popData && code ? popData[code] : null;
+      const rate = getDisplayRate(d);
       return {
-        fillColor: d && d[currentRateKey] !== null ? getColor(d[currentRateKey]) : '#cccccc',
+        fillColor: rate !== null ? getColor(rate, isForeignMode()) : '#cccccc',
         weight: 0.5, opacity: 0.6, color: '#ffffff', fillOpacity: 0.85
       };
     }
@@ -398,7 +517,7 @@
       e.target.setStyle({ weight: 2, color: '#555', fillOpacity: 0.95 });
       e.target.bringToFront();
       const code = e.target.feature.properties.N03_007;
-      infoControl.update(popData && code ? popData[code] : null, currentRateKey);
+      infoControl.update(popData && code ? popData[code] : null, currentRateKey, isForeignMode());
     }
 
     function resetHighlight(e) {
@@ -422,22 +541,30 @@
       }).addTo(map);
     }
 
+    function refreshColors() {
+      if (!geojsonLayer) return;
+      geojsonLayer.eachLayer(layer => {
+        const code = layer.feature.properties.N03_007;
+        const d = popData && code ? popData[code] : null;
+        const rate = getDisplayRate(d);
+        layer.setStyle({
+          fillColor: rate !== null ? getColor(rate, isForeignMode()) : '#cccccc'
+        });
+      });
+      legendControl.render(isForeignMode());
+    }
+
     document.addEventListener('change', function(e) {
       if (e.target.name === 'rateKey') {
         currentRateKey = e.target.value;
-        if (geojsonLayer) {
-          geojsonLayer.eachLayer(layer => {
-            const code = layer.feature.properties.N03_007;
-            const d = popData && code ? popData[code] : null;
-            layer.setStyle({
-              fillColor: d && d[currentRateKey] !== null ? getColor(d[currentRateKey]) : '#cccccc'
-            });
-          });
-        }
+        refreshColors();
+      }
+      if (e.target.name === 'dataMode') {
+        currentDataMode = e.target.value;
+        refreshColors();
       }
     });
 
-    // マップクリック（地図の空白）で詳細パネルを閉じる
     map.on('click', function(e) {
       if (e.originalEvent.target === map.getContainer().querySelector('canvas') ||
           e.originalEvent.target.tagName === 'path') return;
